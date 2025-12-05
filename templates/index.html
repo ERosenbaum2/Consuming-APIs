@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JStory - Story Search System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 JStory</h1>
+            <p class="subtitle">Find the perfect story for your needs</p>
+        </header>
+
+        <main>
+            <div class="search-section">
+                <form id="searchForm">
+                    <div class="search-box">
+                        <input 
+                            type="text" 
+                            id="queryInput" 
+                            placeholder="What kind of story are you looking for? (e.g., 'a story about courage and faith', 'a tale with a moral lesson', 'something about friendship')"
+                            required
+                        >
+                        <button type="submit" id="searchBtn">
+                            <span class="btn-text">Search</span>
+                            <span class="btn-loader" style="display: none;">⏳</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="results" class="results-section" style="display: none;">
+                <div class="rag-response">
+                    <h2>AI Analysis</h2>
+                    <div id="ragResponse" class="response-box"></div>
+                </div>
+
+                <div class="stories-container">
+                    <h2>Top 3 Matching Stories</h2>
+                    <div id="storiesList"></div>
+                </div>
+            </div>
+
+            <div id="error" class="error-message" style="display: none;"></div>
+        </main>
+
+        <footer>
+            <p>Powered by RAG (Retrieval-Augmented Generation) | Using LangChain & ChromaDB</p>
+        </footer>
+    </div>
+
+    <script>
+        const searchForm = document.getElementById('searchForm');
+        const queryInput = document.getElementById('queryInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const btnText = document.querySelector('.btn-text');
+        const btnLoader = document.querySelector('.btn-loader');
+        const resultsSection = document.getElementById('results');
+        const storiesList = document.getElementById('storiesList');
+        const ragResponse = document.getElementById('ragResponse');
+        const errorDiv = document.getElementById('error');
+
+        searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            // Show loading state
+            searchBtn.disabled = true;
+            btnText.style.display = 'none';
+            btnLoader.style.display = 'inline';
+            resultsSection.style.display = 'none';
+            errorDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Search failed');
+                }
+
+                // Display RAG response
+                ragResponse.innerHTML = `<p>${escapeHtml(data.rag_response)}</p>`;
+
+                // Display stories
+                storiesList.innerHTML = '';
+                data.stories.forEach((story, index) => {
+                    const storyCard = document.createElement('div');
+                    storyCard.className = 'story-card';
+                    
+                    const storyText = story.text.length > 500 
+                        ? story.text.substring(0, 500) + '...' 
+                        : story.text;
+                    
+                    storyCard.innerHTML = `
+                        <div class="story-header">
+                            <h3>Story ${index + 1}</h3>
+                            <div class="story-meta">
+                                <span class="source">Source: ${escapeHtml(story.source)}</span>
+                                <span class="score">Match: ${(1 - story.similarity_score).toFixed(2)}</span>
+                            </div>
+                        </div>
+                        <div class="story-content">
+                            <p>${escapeHtml(storyText)}</p>
+                        </div>
+                        ${story.text.length > 500 ? '<button class="expand-btn" onclick="expandStory(this)">Read Full Story</button>' : ''}
+                        <div class="full-story" style="display: none;">${escapeHtml(story.text)}</div>
+                    `;
+                    
+                    storiesList.appendChild(storyCard);
+                });
+
+                resultsSection.style.display = 'block';
+                resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            } catch (error) {
+                errorDiv.textContent = `Error: ${error.message}`;
+                errorDiv.style.display = 'block';
+            } finally {
+                // Reset button state
+                searchBtn.disabled = false;
+                btnText.style.display = 'inline';
+                btnLoader.style.display = 'none';
+            }
+        });
+
+        function expandStory(btn) {
+            const card = btn.closest('.story-card');
+            const fullStory = card.querySelector('.full-story');
+            const storyContent = card.querySelector('.story-content');
+            
+            if (fullStory.style.display === 'none') {
+                fullStory.style.display = 'block';
+                storyContent.style.display = 'none';
+                btn.textContent = 'Show Less';
+            } else {
+                fullStory.style.display = 'none';
+                storyContent.style.display = 'block';
+                btn.textContent = 'Read Full Story';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
+
