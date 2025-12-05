@@ -186,20 +186,25 @@ def health():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# Initialize components when the app starts (works with both Flask dev server and gunicorn)
+try:
+    print("Initializing JStory application...")
+    initialize_components()
+    print("✓ Components initialized successfully")
+except Exception as e:
+    print(f"\n✗ Error initializing application: {e}")
+    print("\nPlease ensure:")
+    print("  1. You have set OPENAI_API_KEY as an environment variable")
+    print("  2. You have run process_stories.py to create the vector database")
+
 if __name__ == '__main__':
-    try:
-        print("Initializing JStory application...")
-        initialize_components()
-        print("\n" + "=" * 60)
-        print("JStory is ready!")
-        print("=" * 60)
-        print("\nStarting Flask server...")
-        print("Open your browser to: http://localhost:5000")
-        print("\nPress Ctrl+C to stop the server\n")
-        app.run(debug=True, host='0.0.0.0', port=5000)
-    except Exception as e:
-        print(f"\n✗ Error initializing application: {e}")
-        print("\nPlease ensure:")
-        print("  1. You have set OPENAI_API_KEY as an environment variable")
-        print("  2. You have run process_stories.py to create the vector database")
+    # Development server only
+    port = int(os.getenv('PORT', 5000))
+    print("\n" + "=" * 60)
+    print("JStory is ready!")
+    print("=" * 60)
+    print(f"\nStarting Flask server on port {port}...")
+    print("Open your browser to: http://localhost:" + str(port))
+    print("\nPress Ctrl+C to stop the server\n")
+    app.run(debug=False, host='0.0.0.0', port=port)
 
