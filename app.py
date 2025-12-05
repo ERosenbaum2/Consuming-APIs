@@ -60,31 +60,39 @@ app = Flask(__name__)
 embeddings = None
 vector_store = None
 llm = None
+initialization_error = None
 
 def initialize_components():
     """Initialize embeddings, vector store, and LLM."""
-    global embeddings, vector_store, llm
+    global embeddings, vector_store, llm, initialization_error
     
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "your_openai_api_key_here":
-        raise ValueError("OPENAI_API_KEY not set as environment variable")
-    
-    # Initialize embeddings and LLM
-    # SSL verification is disabled globally via httpx patch above
-    # This allows OpenAIEmbeddings and ChatOpenAI to create their own clients internally
-    embeddings = OpenAIEmbeddings()
-    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
-    
-    # Load vector store
-    if not os.path.exists("./chroma_db"):
-        raise ValueError("Vector database not found! Please run process_stories.py first.")
-    
-    vector_store = Chroma(
-        persist_directory="./chroma_db",
-        embedding_function=embeddings
-    )
-    
-    print("✓ Components initialized successfully")
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key == "your_openai_api_key_here":
+            raise ValueError("OPENAI_API_KEY not set as environment variable")
+        
+        # Initialize embeddings and LLM
+        # SSL verification is disabled globally via httpx patch above
+        # This allows OpenAIEmbeddings and ChatOpenAI to create their own clients internally
+        embeddings = OpenAIEmbeddings()
+        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
+        
+        # Load vector store
+        chroma_path = "./chroma_db"
+        if not os.path.exists(chroma_path):
+            raise ValueError(f"Vector database not found at {chroma_path}! The chroma_db directory must be included in your deployment. Check that it's not in .gitignore and is committed to your repository.")
+        
+        vector_store = Chroma(
+            persist_directory=chroma_path,
+            embedding_function=embeddings
+        )
+        
+        initialization_error = None
+        print("✓ Components initialized successfully")
+    except Exception as e:
+        initialization_error = str(e)
+        print(f"✗ Error initializing application: {e}")
+        raise
 
 def search_stories(query, k=3):
     """
@@ -153,12 +161,26 @@ def index():
 @app.route('/search', methods=['POST'])
 def search():
     """Handle story search requests."""
+    global initialization_error
+    
+    # Check if initialization failed
+    if initialization_error:
+        return jsonify({
+            'error': f'Application not initialized: {initialization_error}'
+        }), 503
+    
     try:
         data = request.get_json()
         query = data.get('query', '').strip()
         
         if not query:
             return jsonify({'error': 'Query is required'}), 400
+        
+        # Ensure components are initialized
+        if not vector_store:
+            return jsonify({
+                'error': 'Vector store not initialized. Please check server logs for initialization errors.'
+            }), 503
         
         # Search for top 3 matching stories
         stories = search_stories(query, k=3)
@@ -187,15 +209,15 @@ def health():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # Initialize components when the app starts (works with both Flask dev server and gunicorn)
+print("Initializing JStory application...")
 try:
-    print("Initializing JStory application...")
     initialize_components()
-    print("✓ Components initialized successfully")
 except Exception as e:
     print(f"\n✗ Error initializing application: {e}")
     print("\nPlease ensure:")
     print("  1. You have set OPENAI_API_KEY as an environment variable")
-    print("  2. You have run process_stories.py to create the vector database")
+    print("  2. The chroma_db directory exists and is included in your deployment")
+    print("  3. If chroma_db is in .gitignore, remove it and commit the directory to your repository")
 
 if __name__ == '__main__':
     # Development server only

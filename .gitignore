@@ -7,7 +7,7 @@ __pycache__/
 venv/
 env/
 ENV/
-chroma_db/
+# chroma_db/  # Commented out - needed for deployment
 stories/
 *.db
 .DS_Store
