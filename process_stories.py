@@ -115,7 +115,7 @@ def extract_stories_from_file(filepath):
     if len(stories) < 3:
         # Split by double newlines (paragraph breaks)
         paragraphs = re.split(r'\n\n+', content)
-        # Group paragraphs into stories (stories are typically 3+ paragraphs)
+        # Group paragraphs into stories (stories are typically 2+ paragraphs for shorter stories)
         current_story = []
         story_num = 1
         
@@ -123,9 +123,9 @@ def extract_stories_from_file(filepath):
             para = para.strip()
             if len(para) > 50:
                 current_story.append(para)
-                # If we have enough paragraphs, make it a story
-                if len(current_story) >= 3 and len('\n\n'.join(current_story)) > 500:
-                    story_text = '\n\n'.join(current_story)
+                # Make a story if we have 2+ paragraphs and it's substantial
+                story_text = '\n\n'.join(current_story)
+                if len(current_story) >= 2 and len(story_text) > 300:
                     stories.append({
                         'text': story_text,
                         'source': filename,
@@ -136,7 +136,7 @@ def extract_stories_from_file(filepath):
                     story_num += 1
         
         # Add remaining paragraphs as last story
-        if current_story and len('\n\n'.join(current_story)) > 500:
+        if current_story and len('\n\n'.join(current_story)) > 300:
             story_text = '\n\n'.join(current_story)
             stories.append({
                 'text': story_text,
@@ -145,23 +145,114 @@ def extract_stories_from_file(filepath):
                 'metadata': {'source': filename, 'type': 'story', 'number': story_num}
             })
     
-    # If still no good splits, treat entire file as one story (split by chapters if too long)
+    # If still no good splits, split by sentences/paragraphs to create more stories
     if len(stories) < 3:
-        if len(content) > 10000:
-            # Split very long content into chapters
-            chunk_size = 5000
-            chunks = [content[i:i+chunk_size] for i in range(0, len(content), chunk_size)]
-            stories = []
-            for i, chunk in enumerate(chunks, 1):
-                if len(chunk.strip()) > 500:
+        # Try splitting by multiple newlines or section markers
+        # Look for common story separators
+        separators = [
+            r'\n\n\n+',  # Triple newlines
+            r'\n\s*[A-Z][A-Z\s]{15,}\n',  # All caps titles
+            r'\n\s*\d+\.\s+[A-Z]',  # Numbered items
+            r'\n\s*[IVX]+\.\s+[A-Z]',  # Roman numerals
+        ]
+        
+        for sep_pattern in separators:
+            parts = re.split(sep_pattern, content)
+            if len(parts) > 3:
+                stories = []
+                for i, part in enumerate(parts, 1):
+                    part = part.strip()
+                    if len(part) > 200:  # Minimum story length
+                        stories.append({
+                            'text': part,
+                            'source': filename,
+                            'story_id': f"{filename}_section_{i}",
+                            'metadata': {'source': filename, 'type': 'section', 'number': i}
+                        })
+                if len(stories) >= 3:
+                    break
+    
+    # Final fallback: split into chunks of reasonable size
+    # This ensures we always get multiple stories from each book
+    # Very aggressive - want at least 10-15 stories per book to reach 200+ total
+    if len(stories) < 10:  # Very aggressive - want at least 10 stories per book
+        if len(content) > 1000:
+            # Split into smaller chunks (1000-1500 characters) to get more stories
+            # Smaller chunks = more stories
+            chunk_size = 1200  # Smaller chunks for more stories
+            chunks = []
+            start = 0
+            
+            while start < len(content):
+                end = start + chunk_size
+                chunk = content[start:end].strip()
+                
+                # Try to end at a sentence boundary for better story breaks
+                if end < len(content):
+                    # Look for sentence endings in the last 30% of chunk
+                    search_start = int(len(chunk) * 0.7)
+                    for end_marker in ['. ', '.\n', '! ', '!\n', '? ', '?\n', '.\n\n']:
+                        last_pos = chunk.rfind(end_marker, search_start)
+                        if last_pos > search_start:
+                            chunk = chunk[:last_pos + len(end_marker)].strip()
+                            end = start + len(chunk)
+                            break
+                
+                if len(chunk) > 200:  # Lower minimum story length for more stories
+                    chunks.append(chunk)
+                
+                start = end
+                # Skip any leading whitespace
+                while start < len(content) and content[start] in ' \n\t':
+                    start += 1
+            
+            if len(chunks) > 0:
+                stories = []
+                for i, chunk in enumerate(chunks, 1):
                     stories.append({
-                        'text': chunk.strip(),
+                        'text': chunk,
                         'source': filename,
                         'story_id': f"{filename}_chunk_{i}",
                         'metadata': {'source': filename, 'type': 'chunk', 'number': i}
                     })
+        elif len(content) > 500:
+            # Even short content - split into multiple parts (3-5 parts)
+            num_parts = min(5, max(3, len(content) // 400))  # 3-5 parts based on length
+            part_size = len(content) // num_parts
+            stories = []
+            
+            for i in range(num_parts):
+                start = i * part_size
+                end = (i + 1) * part_size if i < num_parts - 1 else len(content)
+                part = content[start:end].strip()
+                
+                # Try to start/end at sentence boundaries
+                if i > 0:
+                    # Find sentence start
+                    for start_marker in ['. ', '.\n', '! ', '!\n', '? ', '?\n']:
+                        pos = part.find(start_marker)
+                        if pos > 0 and pos < 200:
+                            part = part[pos + 2:]
+                            break
+                
+                if i < num_parts - 1:
+                    # Find sentence end
+                    search_start = max(0, len(part) - 300)
+                    for end_marker in ['. ', '.\n', '! ', '!\n', '? ', '?\n']:
+                        pos = part.rfind(end_marker, search_start)
+                        if pos > search_start:
+                            part = part[:pos + 2]
+                            break
+                
+                if len(part) > 200:
+                    stories.append({
+                        'text': part,
+                        'source': filename,
+                        'story_id': f"{filename}_part_{i+1}",
+                        'metadata': {'source': filename, 'type': 'part', 'number': i+1}
+                    })
         else:
-            # Single story
+            # Single story if too short
             stories = [{
                 'text': content.strip(),
                 'source': filename,
